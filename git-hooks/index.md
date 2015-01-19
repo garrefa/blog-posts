@@ -1,0 +1,82 @@
+# Git, Xcode e Testes Automatizados
+## como criar validações básicas para comandos do git
+
+O Git vem se tornando cada vez mais importante nas minhas atividades do dia a dia. Tenho utilizado para backup e sincronia das minhas configurações de ambiente, *.bash\_profile*, *.gitignore\_global*, *.gitconfig*, *.emacs/* e outros. Além disso, obviamente utilizo como repositório dos meus projetos e aqui no trabalho, utilizamos o Git diariamente como sistema de controle de versão dos nossos projetos.
+
+Utilizando o Git todos os dias, surgem necessidades específicas que nos forçam a fugir do básico: clone, commit, pull, push, merge.
+
+Um dos projetos que estou trabalhando atualmente possui três targets. Tenho o target de produção, o target ad hoc para nosso sistema interno de distribuição de testes e o target de testes do calaba.sh, além é claro do nosso target de testes unitários. Com tantos targets e quatro desenvolvedores trabalhando no mesmo código, é normal que vez por outro alguém crie uma nova classe ou resource no projeto e esqueça de adicionar em todos os targets necessários. Depois de quebrar os testes automatizados do calaba.sh muitas vezes e ter que caçar qual a classe/resource que foi esquecida, resolvi escrever um script que checa se alguma das classes/resources adicionadas a algum target do projeto está presente em todos os outros targets onde ela deveria ter sido adicionada.
+
+### Git Hooks 
+
+Hooks são scripts de verificação atrelados a algum comando do Git. Nesse artigo estamos falando especificamente de hooks no lado do cliente. É possível configurar hooks para commits, pushs, apply, rebase, e outros. É possível por exemplo, checar se um commit está seguindo o template padrão. No nosso caso, a ideia é que sempre que eu fizer um git push, o git pare, rode meu script de validação checando se as classes foram adicionadas nos targets corretamente e só continue se o script finalizar com sucesso ou que eu opte por seguir mesmo assim.
+
+### Download e Instalação dos Scripts
+
+Supondo que meu projeto esteja no caminho *~/projetos/my-ios-project*, faremos:
+
+	$ cd ~/projetos/my-ios-project
+	$ git clone git@github.com:garrefa/ci-scripts.git scripts
+	$ cp scripts/pre-push.sample .git/hooks/pre-push
+
+A ativação dos hooks é muito simples, basta copiar o script de hook para a pasta *.git/hooks* com o nome correto e está feito. Esse diretório contem vários arquivos *.sample* de exemplos de hooks para coisas diferentes, recomendo listar e dar uma olhada nesses arquivos.
+
+### Funcionamento
+
+Se analisarmos o script de hook de pre-push veremos que ele executa um outro script:
+
+	$ cat .git/hooks/pre-push
+	...
+	...
+	python3 "../../scripts/validate-pbx.py"
+
+	if [ $? -gt 0 ]
+	then
+		read -p "Faltam resources em alguns targets. Confirmar o push? [s|n] " -n 1 -r < /dev/tty
+		echo
+		if echo $REPLY | grep -E '^[Ss]$' > /dev/null
+		then
+			exit 0 # push will execute
+		fi
+		exit 1 # push will not execute
+	else
+		exit 0 # push will execute
+	fi
+
+Com isso podemos ver que o script de pre-push vai chamar o *valdate-pbx.py*. Este script será encerrado com um status code que indica se a validação teve sucesso ou não. Status code = 0 indica que o script finalizou com sucesso e qualquer coisa maior que zero indica que houve erro.
+
+O script de pre-push analisa o status code, caso seja maior que zero (-gt = greater than), então exibe uma mensagem para o usuário indicando que houveram erros na validação e solicita confirmação do push. Se o usuário digitar S ou s, entao o script encerra retornando 0. Isso indica ao hook que o push pode continuar normalmente. Caso o usuário digite qualquer coisa diferente de S ou s, então o script finaliza com 1 e o push é cancelado.
+É possível forçar a quebra do push em situações de erro e não oferecer ao usuário a opção de continuar mesmo assim. Para isso basta substituir esse script todo por algo assim:
+
+
+	python3 "../../scripts/validate-pbx.py"
+
+	if [ $? -gt 0 ]
+	then
+		exit 1 # push will not execute
+	else
+		exit 0 # push will execute
+	fi
+
+### Bonus
+
+Ok. Agora você configurou o hook, o script valida antes de permitir o push, mas... Você esqueceu de adicionar uma classe a algum target, vai ter que caçar qual a classe? Felizmente não. Em caso de erros, o script *validate-pbx.py* imprime a lista dos targets relevantes e cada classe que está faltando. Vamos a um exemplo:
+
+	$ ./scripts/validate-pbx.py
+
+	[4] files in my-ios-project-adhoc.app
+	[Missing] : * Modernizador.m in Sources
+	[Missing] : * UIImage+AX.m in Sources
+	[Missing] : * BarCodeReaderViewController.m in Sources
+	[Missing] : * DateSelectorView.m in Sources
+
+### Script Source
+
+Os scripts descritos neste artigo estão no meu github: git@github.com:garrefa/ci-scripts.git
+Se você usou/lêu e gostou, mande um ping no twitter @alexmrg
+
+Alexandre Garrefa : @alexmrg
+
+alexandre.garrefa@concretesolutions.com.br
+
+iOS Developer - Concrete Solutions
